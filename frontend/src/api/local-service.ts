@@ -5,6 +5,9 @@ import type { ActionResult, EntryRow, ModuleMeta, OverviewResult, PageResult } f
 // 会写进数据的「往回走」动作：命中就把这条记录标成异常态，看板上能一眼看出来。
 const NEGATIVE_ACTIONS = ['撤销', '作废', '拒绝', '驳回', '停用', '忽略', '下线', '回滚']
 
+// 终态：进入后不可恢复，也不允许再流转到任何旧状态。
+const TERMINAL_STATUSES = new Set(['已归档', '已停用', '已结束', '已下线', '已作废', '已冻结', '已关闭'])
+
 export function moduleMeta(key: string): ModuleMeta {
   const meta = MODULE_BY_KEY.get(key)
   if (!meta) {
@@ -43,6 +46,15 @@ export function runAction(key: string, id: number, action: string): ActionResult
   if (current === target) {
     return { ok: false, message: `${meta.entity}已经是「${target}」，不用重复操作` }
   }
+  // 归档/停用/下线/作废/冻结/关闭是终态：进入后不可恢复，也不允许借任何动作回到旧状态。
+  // 其余状态（例如活动的已暂停）仍按各模块登记的动作流转；回收批次的阶段单向约束
+  // 在 data/recovery.ts 里单独实现。
+  if (TERMINAL_STATUSES.has(current)) {
+    return {
+      ok: false,
+      message: `${meta.entity}已处于终态「${current}」，不可恢复，也不允许回到「${target}」`,
+    }
+  }
   const lastStatus = meta.statuses[meta.statuses.length - 1]
   const updated: EntryRow = {
     ...rows[index],
@@ -59,6 +71,13 @@ export function runAction(key: string, id: number, action: string): ActionResult
 export function resetModule(key: string): PageResult {
   resetRows(key)
   return listEntries(key)
+}
+
+/** 页面上只展示当前状态还能执行的动作：终态不展示任何动作，也不展示会把状态改回自身的动作。 */
+export function availableActions(key: string, status: string): string[] {
+  const meta = moduleMeta(key)
+  if (TERMINAL_STATUSES.has(status)) return []
+  return meta.actions.filter((action) => meta.actionTargets[action] !== status)
 }
 
 export function exportEntries(key: string): { filename: string; content: string } {

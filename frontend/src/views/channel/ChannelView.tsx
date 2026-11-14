@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import { downloadEntries, listEntries, moduleMeta, runAction as applyAction } from '@/api/local-service'
+import {
+  availableActions,
+  downloadEntries,
+  listEntries,
+  moduleMeta,
+  runAction as applyAction,
+} from '@/api/local-service'
+import { disableChannel } from '@/api/orchestration-service'
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('channel')
@@ -12,32 +19,17 @@ const columns = [
   "转化事件",
   "归因窗口天",
   "计费模式",
-  "渠道负责人"
-]
-const actions = [
-  "提交渠道评审",
-  "启用渠道",
-  "停用渠道"
+  "渠道负责人",
+  "停用生效时间",
+  "回收批次",
+  "可释放预算",
+  "已释放金额"
 ]
 const statuses = [
   "草稿",
   "渠道评审中",
   "已启用",
   "已停用"
-]
-const stats = [
-  {
-    "label": "渠道配置总数",
-    "value": 0
-  },
-  {
-    "label": "已启用渠道",
-    "value": 0
-  },
-  {
-    "label": "渠道评审中",
-    "value": 0
-  }
 ]
 
 export default function ChannelView() {
@@ -46,6 +38,18 @@ export default function ChannelView() {
   const [errorMessage, setErrorMessage] = useState('')
   const [filters, setFilters] = useState<Record<string, string>>({})
   const filterFields = useMemo(() => columns.slice(0, 3), [])
+  const statCards = useMemo(
+    () => [
+      { label: '渠道配置总数', value: total },
+      { label: '已启用渠道', value: rows.filter((row) => String(row.status) === '已启用').length },
+      { label: '渠道评审中', value: rows.filter((row) => String(row.status) === '渠道评审中').length },
+      {
+        label: '累计释放金额',
+        value: rows.reduce((sum, row) => sum + Number(row['已释放金额'] ?? 0), 0).toLocaleString('zh-CN'),
+      },
+    ],
+    [rows, total],
+  )
 
   const reload = useCallback(() => {
     setErrorMessage('')
@@ -64,7 +68,11 @@ export default function ChannelView() {
 
   function runAction(action: string, row: EntryRow) {
     setErrorMessage('')
-    const result = applyAction(meta.key, Number(row.id), action)
+    // 停用渠道是投产回收的业务入口：停用与生成待回收队列在同一次写入里完成。
+    const result =
+      action === '停用渠道'
+        ? disableChannel(Number(row.id), undefined, new Date().toISOString())
+        : applyAction(meta.key, Number(row.id), action)
     if (!result.ok) {
       setErrorMessage(result.message)
       return
@@ -90,13 +98,17 @@ export default function ChannelView() {
       </header>
 
       <div className="stat-row">
-        {stats.map((item) => (
+        {statCards.map((item) => (
           <article key={item.label} className="stat-card">
             <span className="stat-label">{item.label}</span>
             <strong className="stat-value">{item.value}</strong>
           </article>
         ))}
       </div>
+
+      <p className="page-desc">
+        停用渠道会自动生成待回收活动队列，可释放预算与已释放金额同步到这里；详细回收请到「渠道投产编排」。
+      </p>
 
       <p className="status-legend">
         {statuses.map((status: string) => (
@@ -135,7 +147,7 @@ export default function ChannelView() {
               {columns.map((column) => <td key={column}>{row[column] ?? '—'}</td>)}
               <td>{row.status}</td>
               <td className="row-actions">
-                {actions.map((action) => (
+                {availableActions(meta.key, String(row.status)).map((action) => (
                   <button key={action} className="link" type="button" onClick={() => runAction(action, row)}>
                     {action}
                   </button>

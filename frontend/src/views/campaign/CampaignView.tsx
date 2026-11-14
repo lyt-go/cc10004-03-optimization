@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-import { downloadEntries, listEntries, moduleMeta, runAction as applyAction } from '@/api/local-service'
+import {
+  availableActions,
+  downloadEntries,
+  listEntries,
+  moduleMeta,
+  runAction as applyAction,
+} from '@/api/local-service'
 import type { EntryRow } from '@/data/types'
 
 const meta = moduleMeta('campaign')
@@ -12,12 +18,12 @@ const columns = [
   "结束日期",
   "日预算",
   "目标ROI",
-  "投放人群"
-]
-const actions = [
-  "提交活动审批",
-  "开始投放",
-  "暂停投放"
+  "投放人群",
+  "已消耗预算",
+  "回收来源",
+  "回收结论",
+  "准入结论",
+  "释放金额"
 ]
 const statuses = [
   "草稿",
@@ -26,20 +32,6 @@ const statuses = [
   "已结束",
   "已暂停"
 ]
-const stats = [
-  {
-    "label": "投放活动总数",
-    "value": 0
-  },
-  {
-    "label": "投放中活动",
-    "value": 0
-  },
-  {
-    "label": "已结束活动",
-    "value": 0
-  }
-]
 
 export default function CampaignView() {
   const [rows, setRows] = useState<EntryRow[]>([])
@@ -47,6 +39,15 @@ export default function CampaignView() {
   const [errorMessage, setErrorMessage] = useState('')
   const [filters, setFilters] = useState<Record<string, string>>({})
   const filterFields = useMemo(() => columns.slice(0, 3), [])
+  const statCards = useMemo(
+    () => [
+      { label: '投放活动总数', value: total },
+      { label: '投放中活动', value: rows.filter((row) => String(row.status) === '投放中').length },
+      { label: '已结束活动', value: rows.filter((row) => String(row.status) === '已结束').length },
+      { label: '待暂停来源', value: rows.filter((row) => String(row['回收结论'] ?? '') === '待暂停').length },
+    ],
+    [rows, total],
+  )
 
   const reload = useCallback(() => {
     setErrorMessage('')
@@ -91,13 +92,17 @@ export default function CampaignView() {
       </header>
 
       <div className="stat-row">
-        {stats.map((item) => (
+        {statCards.map((item) => (
           <article key={item.label} className="stat-card">
             <span className="stat-label">{item.label}</span>
             <strong className="stat-value">{item.value}</strong>
           </article>
         ))}
       </div>
+
+      <p className="page-desc">
+        渠道停用后由「渠道投产编排」回写：待暂停活动在此显示来源批次，已结束活动释放未消耗预算。
+      </p>
 
       <p className="status-legend">
         {statuses.map((status: string) => (
@@ -136,7 +141,7 @@ export default function CampaignView() {
               {columns.map((column) => <td key={column}>{row[column] ?? '—'}</td>)}
               <td>{row.status}</td>
               <td className="row-actions">
-                {actions.map((action) => (
+                {availableActions(meta.key, String(row.status)).map((action) => (
                   <button key={action} className="link" type="button" onClick={() => runAction(action, row)}>
                     {action}
                   </button>
